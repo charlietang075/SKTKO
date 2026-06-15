@@ -1,168 +1,82 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Sai Kung Weather</title>
-  <style>
-    :root{
-      --bg:#f4f7fb; --card:#ffffff; --accent:#0b6cff; --muted:#6b7280;
-      --shadow: 0 6px 18px rgba(11,108,255,0.08);
-      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+const FLW_URL = 'https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=flw&lang=en';
+
+async function fetchJson(url){
+  const res = await fetch(url, {cache:'no-cache'});
+  if(!res.ok) throw new Error('Fetch failed: ' + res.status);
+  return res.json();
+}
+
+// Generic recursive search: find object with a property matching the areaName
+function findArea(obj, areaName){
+  if(!obj || typeof obj !== 'object') return null;
+  if(Array.isArray(obj)){
+    for(const item of obj){
+      const found = findArea(item, areaName);
+      if(found) return found;
     }
-    body{margin:0;background:var(--bg);color:#0f1724;display:flex;align-items:flex-start;justify-content:center;padding:28px;}
-    .wrap{width:100%;max-width:920px}
-    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
-    h1{font-size:20px;margin:0}
-    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:var(--shadow);margin-bottom:14px}
-    .current{display:flex;gap:18px;align-items:center}
-    .temp{font-size:48px;font-weight:600}
-    .meta{color:var(--muted)}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:12px}
-    .tile{background:#f8fafc;border-radius:10px;padding:10px;text-align:center}
-    .forecast-row{display:flex;gap:12px;overflow:auto;padding-bottom:6px}
-    .day{min-width:110px;background:#fff;border-radius:10px;padding:10px;box-shadow:0 4px 10px rgba(2,6,23,0.04);text-align:center}
-    .small{font-size:13px;color:var(--muted)}
-    footer{font-size:13px;color:var(--muted);text-align:center;margin-top:8px}
-    .loading{opacity:0.6}
-    @media (max-width:520px){ .temp{font-size:36px} }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <h1>Sai Kung Weather</h1>
-      <div class="small">Last update: <span id="last-update">—</span></div>
-    </header>
-
-    <section id="current-card" class="card">
-      <div class="current">
-        <div>
-          <div class="temp" id="temp">--°C</div>
-          <div class="small" id="cond">—</div>
-        </div>
-        <div style="margin-left:auto;text-align:right">
-          <div class="meta">Wind: <span id="wind">—</span></div>
-          <div class="meta">Humidity: <span id="humidity">—</span></div>
-          <div class="meta">Rain: <span id="rain">—</span></div>
-        </div>
-      </div>
-
-      <div class="grid" style="margin-top:14px">
-        <div class="tile">
-          <div class="small">Feels like</div>
-          <div id="feels">—°C</div>
-        </div>
-        <div class="tile">
-          <div class="small">Visibility</div>
-          <div id="vis">— km</div>
-        </div>
-        <div class="tile">
-          <div class="small">UV index</div>
-          <div id="uv">—</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="forecast-card" class="card">
-      <h3 style="margin:0 0 10px 0">Forecast</h3>
-      <div id="forecast" class="forecast-row loading">Loading forecast…</div>
-    </section>
-
-    <footer class="small">Data source: Hong Kong Observatory (replace API URLs in script)</footer>
-  </div>
-
-  <script>
-    // ====== CONFIG: replace these with the HKO endpoints you want to use ======
-    const API_CURRENT_URL  = 'https://your-hko-endpoint/current.json';   // placeholder
-    const API_FORECAST_URL = 'https://your-hko-endpoint/forecast.json';  // placeholder
-
-    // ====== Utility ======
-    function fmtTime(ts){
-      const d = new Date(ts);
-      return d.toLocaleString();
+    return null;
+  }
+  // common property names to check
+  const nameKeys = ['name','area','areaName','place','location','district'];
+  for(const k of nameKeys){
+    if(obj[k] && String(obj[k]).toLowerCase().includes(areaName.toLowerCase())){
+      return obj;
     }
+  }
+  for(const k of Object.keys(obj)){
+    const found = findArea(obj[k], areaName);
+    if(found) return found;
+  }
+  return null;
+}
 
-    // ====== Rendering helpers (adjust to match HKO JSON structure) ======
-    function renderCurrent(data){
-      // Example mapping — update keys to match the HKO response
-      // Replace these property accesses with the actual fields from HKO JSON
-      const temp = data.temperature ?? data.temp ?? '—';
-      const cond = data.description ?? data.weather ?? '—';
-      const wind = (data.windSpeed ? data.windSpeed + ' km/h' : (data.wind || '—'));
-      const humidity = data.humidity ?? '—';
-      const rain = data.rainfall ?? data.rain ?? '—';
-      const feels = data.feels_like ?? '—';
-      const vis = data.visibility ?? '—';
-      const uv = data.uv_index ?? '—';
-      const updateTs = data.updateTime ?? Date.now();
+function renderFlwArea(areaObj){
+  const container = document.getElementById('forecast');
+  container.classList.remove('loading');
+  container.innerHTML = '';
+  if(!areaObj){
+    container.textContent = 'Sai Kung forecast not found in dataset.';
+    return;
+  }
 
-      document.getElementById('temp').textContent = temp + '°C';
-      document.getElementById('cond').textContent = cond;
-      document.getElementById('wind').textContent = wind;
-      document.getElementById('humidity').textContent = humidity + '%';
-      document.getElementById('rain').textContent = rain;
-      document.getElementById('feels').textContent = feels + '°C';
-      document.getElementById('vis').textContent = vis;
-      document.getElementById('uv').textContent = uv;
-      document.getElementById('last-update').textContent = fmtTime(updateTs);
-    }
+  // Try to find an array of days in common keys
+  const candidates = ['forecast', 'weatherForecast', 'forecastPeriod', 'data', 'days'];
+  let days = null;
+  for(const k of candidates){
+    if(Array.isArray(areaObj[k])) { days = areaObj[k]; break; }
+  }
+  // fallback: if areaObj itself is an array
+  if(!days && Array.isArray(areaObj)) days = areaObj;
 
-    function renderForecast(data){
-      // Expecting an array of day objects; adjust to match HKO JSON
-      const container = document.getElementById('forecast');
-      container.classList.remove('loading');
-      container.innerHTML = '';
+  if(!days || !days.length){
+    container.textContent = 'No forecast days found for Sai Kung.';
+    return;
+  }
 
-      const days = data.days ?? data.forecast ?? [];
-      if(!days.length){
-        container.textContent = 'No forecast data available.';
-        return;
-      }
+  days.slice(0,7).forEach(d => {
+    const date = d.forecastDate ?? d.date ?? d.day ?? d.time ?? '—';
+    const hi = d.maxTemp ?? d.maxTempC ?? d.temperatureMax ?? '—';
+    const lo = d.minTemp ?? d.minTempC ?? d.temperatureMin ?? '—';
+    const desc = d.forecast ?? d.forecastWeather ?? d.forecastDesc ?? d.weather ?? '—';
+    const el = document.createElement('div');
+    el.className = 'day';
+    el.innerHTML = `<div class="small">${date}</div>
+                    <div style="font-weight:600;margin:8px 0">${hi}° / ${lo}°</div>
+                    <div class="small">${desc}</div>`;
+    container.appendChild(el);
+  });
+}
 
-      days.slice(0,7).forEach(day => {
-        const dateLabel = day.date ?? day.day ?? '—';
-        const icon = day.icon ?? ''; // you can map codes to icons later
-        const hi = day.maxTemp ?? day.high ?? '—';
-        const lo = day.minTemp ?? day.low ?? '—';
-        const desc = day.summary ?? day.text ?? '—';
+async function loadSaiKungForecast(){
+  try{
+    const json = await fetchJson(FLW_URL);
+    console.log('FLW JSON (inspect):', json); // inspect in console to adapt mapping
+    const area = findArea(json, 'Sai Kung');
+    renderFlwArea(area);
+  } catch(err){
+    console.error(err);
+    document.getElementById('forecast').textContent = 'Error loading forecast.';
+  }
+}
 
-        const el = document.createElement('div');
-        el.className = 'day';
-        el.innerHTML = `
-          <div class="small">${dateLabel}</div>
-          <div style="font-weight:600;margin:8px 0">${hi}° / ${lo}°</div>
-          <div class="small">${desc}</div>
-        `;
-        container.appendChild(el);
-      });
-    }
-
-    // ====== Fetching ======
-    async function fetchJson(url){
-      const res = await fetch(url, {cache: 'no-cache'});
-      if(!res.ok) throw new Error('Network response was not ok');
-      return res.json();
-    }
-
-    async function refreshAll(){
-      try{
-        // Fetch current conditions
-        const currentData = await fetchJson(API_CURRENT_URL);
-        renderCurrent(currentData);
-
-        // Fetch forecast
-        const forecastData = await fetchJson(API_FORECAST_URL);
-        renderForecast(forecastData);
-      } catch(err){
-        console.error(err);
-        document.getElementById('forecast').textContent = 'Error loading data.';
-      }
-    }
-
-    // Initial load and auto-refresh every 10 minutes
-    refreshAll();
-    setInterval(refreshAll, 10 * 60 * 1000);
-  </script>
-</body>
-</html>
+loadSaiKungForecast();
